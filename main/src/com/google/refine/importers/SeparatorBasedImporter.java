@@ -37,7 +37,6 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.io.LineNumberReader;
 import java.io.Reader;
 import java.io.UnsupportedEncodingException;
@@ -51,12 +50,15 @@ import java.util.Map;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.google.common.base.CharMatcher;
+import com.univocity.parsers.common.AbstractParser;
 import com.univocity.parsers.common.TextParsingException;
 import com.univocity.parsers.common.record.Record;
 import com.univocity.parsers.csv.CsvFormat;
 import com.univocity.parsers.csv.CsvParser;
 import com.univocity.parsers.csv.CsvParserSettings;
 import com.univocity.parsers.csv.UnescapedQuoteHandling;
+import com.univocity.parsers.tsv.TsvParser;
+import com.univocity.parsers.tsv.TsvParserSettings;
 import org.apache.commons.text.StringEscapeUtils;
 
 import com.google.refine.ProjectMetadata;
@@ -67,6 +69,11 @@ import com.google.refine.util.JSONUtilities;
 
 public class SeparatorBasedImporter extends TabularImportingParserBase {
 
+    // Excel limits: 1M rows x 16K columns, 32K characters max per cell
+    public static final int MAX_COLUMNS = 16 * 1024; // default 512
+    // TODO: Perhaps use a lower default and make user configurable?
+    public static final int MAX_CHARACTERS_PER_CELL = 32 * 1024; // default 4096
+    public static final int GUESSER_LINE_COUNT = 100;
     char DEFAULT_QUOTE_CHAR = new CsvParserSettings().getFormat().getQuote();
 
     public SeparatorBasedImporter() {
@@ -108,6 +115,9 @@ public class SeparatorBasedImporter extends TabularImportingParserBase {
         boolean processQuotes = JSONUtilities.getBoolean(options, "processQuotes", true);
         boolean strictQuotes = JSONUtilities.getBoolean(options, "strictQuotes", false);
 
+        // TODO: Perhaps ask user to declare explicitly if they want TSV or weird CSV with \t separator hybrid?
+        boolean tsv = "\t".equals(sep) && !processQuotes && !strictQuotes;
+
         List<Object> retrievedColumnNames = null;
         if (options.has("columnNames")) {
             String[] strings = JSONUtilities.getStringArray(options, "columnNames");
@@ -136,21 +146,34 @@ public class SeparatorBasedImporter extends TabularImportingParserBase {
             quote = CharMatcher.whitespace().trimFrom(quoteCharacter).charAt(0);
         }
 
-        CsvParserSettings settings = new CsvParserSettings();
-        CsvFormat format = settings.getFormat();
-        format.setDelimiter(sep);
-        format.setQuote(quote);
-        format.setLineSeparator("\n");
-        settings.setIgnoreLeadingWhitespaces(false);
-        settings.setIgnoreTrailingWhitespaces(false);
-        if (strictQuotes) {
-            settings.setUnescapedQuoteHandling(UnescapedQuoteHandling.RAISE_ERROR);
+        AbstractParser parser;
+        if (tsv) {
+            TsvParserSettings settings = new TsvParserSettings();
+            settings.setMaxCharsPerColumn(MAX_CHARACTERS_PER_CELL);
+            settings.setMaxColumns(MAX_COLUMNS);
+            settings.setLineSeparatorDetectionEnabled(true);
+            settings.setIgnoreLeadingWhitespaces(false);
+            settings.setIgnoreTrailingWhitespaces(false);
+            parser = new TsvParser(settings);
+        } else {
+            CsvParserSettings settings = new CsvParserSettings();
+            CsvFormat format = settings.getFormat();
+            format.setDelimiter(sep);
+            format.setQuote(quote);
+            settings.setMaxColumns(MAX_COLUMNS);
+            settings.setLineSeparatorDetectionEnabled(true);
+            settings.setIgnoreLeadingWhitespaces(false);
+            settings.setIgnoreTrailingWhitespaces(false);
+            if (strictQuotes) {
+                settings.setUnescapedQuoteHandling(UnescapedQuoteHandling.RAISE_ERROR);
+            }
+            settings.setKeepQuotes(!processQuotes);
+            settings.setMaxCharsPerColumn(MAX_CHARACTERS_PER_CELL);
+            settings.setMaxColumns(MAX_COLUMNS);
+            parser = new CsvParser(settings);
         }
-        settings.setKeepQuotes(!processQuotes);
-        settings.setMaxCharsPerColumn(256 * 1024); // TODO: Perhaps use a lower default and make user configurable?
-
         try (final LineNumberReader lnReader = new LineNumberReader(reader);) {
-            CsvParser parser = new CsvParser(settings);
+
             parser.beginParsing(lnReader);
 
             TableDataReader dataReader = new TableDataReader() {
@@ -194,13 +217,12 @@ public class SeparatorBasedImporter extends TabularImportingParserBase {
                 CsvFormat format = guessFormat(file, encoding);
                 if (format != null) {
                     if (separator != null) {
-                        if (format.getDelimiter() == separator.separator) {
-                            // They both agree - yay!
-                            return StringEscapeUtils.escapeJava(Character.toString(separator.separator));
-                        } else {
-                            logger.warn("Delimiter guesses disagree - uniVocity: {} - internal: {}", format.getDelimiter(),
+                        if (format.getDelimiter() != separator.separator) {
+                            logger.warn("Delimiter guesses disagree - uniVocity: '{}' - internal: '{}'", format.getDelimiter(),
                                     separator.separator);
                         }
+                        // Even if they disagree, use our guess for backward compatibility
+                        return StringEscapeUtils.escapeJava(Character.toString(separator.separator));
                     } else {
                         // We got a guess from CsvParser, but not ours, so let's use that
                         return StringEscapeUtils.escapeJava(format.getDelimiterString());
@@ -211,7 +233,6 @@ public class SeparatorBasedImporter extends TabularImportingParserBase {
                         return StringEscapeUtils.escapeJava(Character.toString(separator.separator));
                     }
                 }
-
             }
         }
         return null;
@@ -230,18 +251,15 @@ public class SeparatorBasedImporter extends TabularImportingParserBase {
 
     static public CsvFormat guessFormat(File file, String encoding) {
         try (InputStream is = new FileInputStream(file);
-                Reader reader = encoding != null ? new InputStreamReader(is, encoding) : new InputStreamReader(is);
+                Reader reader = ImportingUtilities.getInputStreamReader(is, encoding);
                 LineNumberReader lineNumberReader = new LineNumberReader(reader)) {
             CsvParserSettings settings = new CsvParserSettings();
+            // We could provide a set of delimiters to consider below if we wanted to restrict this
             settings.detectFormatAutomatically();
-            settings.setFormatDetectorRowSampleCount(100);
+            settings.setFormatDetectorRowSampleCount(GUESSER_LINE_COUNT); // default is 20, but let's match our guesser
             CsvParser parser = new CsvParser(settings);
             parser.beginParsing(lineNumberReader);
-            for (int i = 0; i < 20; i++) {
-                if (parser.parseNext() == null) {
-                    break;
-                }
-            }
+            // Format guesser result is available as soon as beginParsing() completes
             return parser.getDetectedFormat();
         } catch (IOException e) {
             e.printStackTrace();
@@ -256,7 +274,7 @@ public class SeparatorBasedImporter extends TabularImportingParserBase {
     static public Separator guessSeparator(File file, String encoding, boolean handleQuotes) {
         try {
             try (InputStream is = new FileInputStream(file);
-                    Reader reader = encoding != null ? new InputStreamReader(is, encoding) : new InputStreamReader(is);
+                    Reader reader = ImportingUtilities.getInputStreamReader(is, encoding);
                     LineNumberReader lineNumberReader = new LineNumberReader(reader)) {
 
                 List<Separator> separators = new ArrayList<>();
@@ -267,7 +285,7 @@ public class SeparatorBasedImporter extends TabularImportingParserBase {
                 boolean inQuote = false;
                 String s;
                 while (totalChars < 64 * 1024 &&
-                        lineCount < 100 &&
+                        lineCount < GUESSER_LINE_COUNT &&
                         (s = lineNumberReader.readLine()) != null) {
 
                     totalChars += s.length() + 1; // count the new line character

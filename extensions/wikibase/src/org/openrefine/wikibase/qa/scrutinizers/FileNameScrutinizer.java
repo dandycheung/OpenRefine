@@ -22,16 +22,18 @@ public class FileNameScrutinizer extends EditScrutinizer {
     // see https://commons.wikimedia.org/wiki/Commons:File_naming
     public static final int maxFileNameBytes = 240;
     public static final Pattern forbiddenFileNameChars = Pattern.compile(
-            ".*([^ %!\"$&'()*,\\-./\\d:;=?@\\p{L}\\p{Mc}\\\\^_`~\\x80-\\xFF+]|%[0-9A-Fa-f]{2}|&[A-Za-z0-9\\x80-\\xff]+;|&#[0-9]+;|&#x[0-9A-Fa-f]+;).*");
+            ".*([^ %!\"$&'()*,\\-./\\d:;=?@\\p{L}\\p{M}\\p{N}\\\\^_`~\\x80-\\xFF+]|%[0-9A-Fa-f]{2}|&[A-Za-z0-9\\x80-\\xff]+;|&#[0-9]+;|&#x[0-9A-Fa-f]+;).*");
 
     public static final String duplicateFileNamesInBatchType = "duplicate-file-names-in-batch";
     public static final String fileNamesAlreadyExistOnWikiType = "file-names-already-exist-on-wiki";
+    public static final String uploadNewFileVersionType = "upload-new-file-version";
     public static final String invalidCharactersInFileNameType = "invalid-characters-in-file-name";
     public static final String fileNameTooLongType = "file-name-too-long";
     public static final String missingFileNameExtensionType = "missing-file-name-extension";
     public static final String inconsistentFileNameAndPathExtensionType = "inconsistent-file-name-and-path-extension";
 
     protected Set<String> seenFileNames;
+    protected Set<String> matchedFileNames;
 
     @Override
     public boolean prepareDependencies() {
@@ -46,6 +48,7 @@ public class FileNameScrutinizer extends EditScrutinizer {
     @Override
     public void batchIsBeginning() {
         seenFileNames = new HashSet<>();
+        matchedFileNames = new HashSet<>();
     }
 
     /**
@@ -65,6 +68,15 @@ public class FileNameScrutinizer extends EditScrutinizer {
         if (fileName == null || fileName.isEmpty()) {
             // empty file names for new items are handled in NewEntityScrutinizer
             return;
+        }
+
+        if (edit.isMatched() && !edit.getFilePath().isEmpty()) {
+            String normalizedFileName = normalizeFileNameSpaces(fileName);
+            matchedFileNames.add(normalizedFileName);
+            QAWarning issue = new QAWarning(uploadNewFileVersionType, null,
+                    QAWarning.Severity.INFO, matchedFileNames.size());
+            issue.setProperty("example_filename", matchedFileNames.stream().findFirst().get());
+            addIssue(issue);
         }
 
         if (edit.isNew()) {
@@ -98,7 +110,7 @@ public class FileNameScrutinizer extends EditScrutinizer {
             // Invalid characters
             Matcher matcher = forbiddenFileNameChars.matcher(fileName);
             if (matcher.matches()) {
-                QAWarning issue = new QAWarning(invalidCharactersInFileNameType, null, QAWarning.Severity.CRITICAL,
+                QAWarning issue = new QAWarning(invalidCharactersInFileNameType, null, QAWarning.Severity.IMPORTANT,
                         1);
                 issue.setProperty("example_filename", fileName);
                 issue.setProperty("invalid_character", matcher.group(1));

@@ -108,7 +108,8 @@ public class WikibaseSchemaTest extends WikidataRefineTest {
 
     @BeforeMethod
     public void setUpProject() {
-        project = this.createCSVProject(TestingData.inceptionCsv);
+        project = this.createProject(TestingData.inceptionColumns,
+                TestingData.inceptionProjectGrid);
         project.rows.get(0).cells.set(0, TestingData.makeMatchedCell("Q1377", "University of Ljubljana"));
         project.rows.get(1).cells.set(0, TestingData.makeMatchedCell("Q865528", "University of Warwick"));
     }
@@ -153,9 +154,9 @@ public class WikibaseSchemaTest extends WikidataRefineTest {
         Engine engine = new Engine(project);
         List<EntityEdit> updates = schema.evaluate(project, engine);
         List<EntityEdit> expected = new ArrayList<>();
-        TermedStatementEntityEdit update1 = new ItemEditBuilder(qid1).addStatement(statementUpdate1).build();
+        TermedStatementEntityEdit update1 = new ItemEditBuilder(qid1).addStatement(statementUpdate1).addContributingRowId(123).build();
         expected.add(update1);
-        TermedStatementEntityEdit update2 = new ItemEditBuilder(qid2).addStatement(statementUpdate2).build();
+        TermedStatementEntityEdit update2 = new ItemEditBuilder(qid2).addStatement(statementUpdate2).addContributingRowId(123).build();
         expected.add(update2);
         assertEquals(expected, updates);
     }
@@ -208,7 +209,7 @@ public class WikibaseSchemaTest extends WikidataRefineTest {
         assertTrue(validation.getValidationErrors().isEmpty());
 
         Engine engine = new Engine(project);
-        EngineConfig engineConfig = EngineConfig.reconstruct("{\n"
+        EngineConfig engineConfig = EngineConfig.deserialize("{\n"
                 + "      \"mode\": \"row-based\",\n"
                 + "      \"facets\": [\n"
                 + "        {\n"
@@ -225,7 +226,7 @@ public class WikibaseSchemaTest extends WikidataRefineTest {
         engine.initializeFromConfig(engineConfig);
         List<EntityEdit> updates = schema.evaluate(project, engine);
         List<EntityEdit> expected = new ArrayList<>();
-        EntityEdit update1 = new ItemEditBuilder(qid1).addStatement(statementUpdate1).build();
+        EntityEdit update1 = new ItemEditBuilder(qid1).addStatement(statementUpdate1).addContributingRowId(123).build();
         expected.add(update1);
         assertEquals(expected, updates);
     }
