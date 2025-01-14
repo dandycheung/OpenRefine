@@ -52,8 +52,10 @@ import java.util.concurrent.TimeUnit;
 import javax.swing.JFrame;
 
 import com.google.util.threads.ThreadPoolExecutorAdapter;
-import org.apache.commons.lang.SystemUtils;
-import org.apache.log4j.Level;
+import org.apache.commons.lang3.SystemUtils;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.core.config.Configurator;
 import org.eclipse.jetty.server.HttpConfiguration;
 import org.eclipse.jetty.server.HttpConnectionFactory;
 import org.eclipse.jetty.server.Server;
@@ -96,7 +98,10 @@ public class Refine {
         // System.setProperty("debug","true");
 
         // set the log verbosity level
-        org.apache.log4j.Logger.getRootLogger().setLevel(Level.toLevel(Configurations.get("refine.verbosity", "info")));
+        String logLevelArg = Configurations.get("refine.verbosity");
+        if (logLevelArg != null && !logLevelArg.isEmpty()) {
+            Configurator.setAllLevels(LogManager.getRootLogger().getName(), Level.toLevel(logLevelArg));
+        }
 
         port = Configurations.getInteger("refine.port", DEFAULT_PORT);
         iface = Configurations.get("refine.interface", DEFAULT_IFACE);
@@ -168,12 +173,12 @@ class RefineServer extends Server {
     private ThreadPoolExecutor threadPool;
 
     public void init(String iface, int port, String host) throws Exception {
-        logger.info("Starting Server bound to '" + iface + ":" + port + "'");
-
-        String memory = Configurations.get("refine.memory");
-        if (memory != null) {
-            logger.info("refine.memory size: " + memory + " JVM Max heap: " + Runtime.getRuntime().maxMemory() + " bytes");
-        }
+        logger.info("Java runtime version {} from java.home: {}", Runtime.version().toString(), System.getProperty("java.home", ""));
+        logger.info("Java VM: {} {} {} {}", System.getProperty("java.vm.vendor", ""), System.getProperty("java.vm.name", ""),
+                System.getProperty("java.vm.version", ""), System.getProperty("java.vm.info", ""));
+        logger.info("Starting Server bound to http://{}:{}", iface, port);
+        logger.info("refine.memory size: {} JVM Max heap: {} MBytes", Configurations.get("refine.memory", "<default>"),
+                Runtime.getRuntime().maxMemory() / 1024 / 1024.0);
 
         HttpConfiguration httpConfig = new HttpConfiguration();
         httpConfig.setSendServerVersion(false);
@@ -345,6 +350,7 @@ class RefineServer extends Server {
         }
 
         File dataDir = null;
+        File extensionsDir = null;
         File grefineDir = null;
         File gridworksDir = null;
 
@@ -369,6 +375,7 @@ class RefineServer extends Server {
             }
 
             dataDir = new File(parentDir, "OpenRefine");
+            extensionsDir = new File(dataDir, "extensions");
             grefineDir = new File(new File(parentDir, "Google"), "Refine");
             gridworksDir = new File(parentDir, "Gridworks");
         } else if (os.contains("os x")) {
@@ -383,6 +390,10 @@ class RefineServer extends Server {
 
             String gridworks_home = (home != null) ? home + "/Library/Application Support/Gridworks" : ".gridworks";
             gridworksDir = new File(gridworks_home);
+
+            String extensions_home = (home != null) ? home + "/Library/Application Support/OpenRefine/extensions"
+                    : ".openrefine/extensions";
+            extensionsDir = new File(extensions_home);
         } else { // most likely a UNIX flavor
             // start with the XDG environment
             // see http://standards.freedesktop.org/basedir-spec/basedir-spec-latest.html
@@ -396,6 +407,7 @@ class RefineServer extends Server {
             }
 
             dataDir = new File(data_home + "/openrefine");
+            extensionsDir = new File(data_home + "/openrefine/extensions");
             grefineDir = new File(data_home + "/google/refine");
             gridworksDir = new File(data_home + "/gridworks");
         }
@@ -432,6 +444,12 @@ class RefineServer extends Server {
             logger.info("Creating new workspace directory " + dataDir);
             if (!dataDir.mkdirs()) {
                 logger.error("FAILED to create new workspace directory " + dataDir);
+            }
+        }
+
+        if (!extensionsDir.exists()) {
+            if (!extensionsDir.mkdirs()) {
+                logger.error("FAILED to create new extensions directory " + extensionsDir);
             }
         }
 
@@ -513,7 +531,7 @@ class RefineClient extends JFrame implements ActionListener {
         } else if (SystemUtils.IS_OS_LINUX) {
             rt.exec(new String[] { "xdg-open", String.valueOf(uri) });
         } else {
-            logger.warn("Java Desktop class not supported on this platform. Please open %s in your browser", uri.toString());
+            logger.warn("Java Desktop class not supported on this platform. Please open {} in your browser", uri.toString());
         }
     }
 }

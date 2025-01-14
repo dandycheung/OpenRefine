@@ -47,6 +47,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
+import org.apache.commons.lang.Validate;
 import org.apache.hc.core5.http.Header;
 import org.apache.hc.core5.http.message.BasicHeader;
 
@@ -58,6 +59,7 @@ import com.google.refine.expr.EvalError;
 import com.google.refine.expr.Evaluable;
 import com.google.refine.expr.ExpressionUtils;
 import com.google.refine.expr.MetaParser;
+import com.google.refine.expr.ParsingException;
 import com.google.refine.expr.WrappedCell;
 import com.google.refine.history.HistoryEntry;
 import com.google.refine.model.Cell;
@@ -131,6 +133,7 @@ public class ColumnAdditionByFetchingURLsOperation extends EngineDependentOperat
         if (_httpHeadersJson != null) {
             for (HttpHeader header : _httpHeadersJson) {
                 if (!isNullOrEmpty(header.name) && !isNullOrEmpty(header.value)) {
+                    // TODO: Should we be checking headers against a whitelist here?
                     headers.add(new BasicHeader(header.name, header.value));
                 }
             }
@@ -138,6 +141,21 @@ public class ColumnAdditionByFetchingURLsOperation extends EngineDependentOperat
         httpHeaders = headers.toArray(httpHeaders);
         _httpClient = new HttpClient(_delay);
 
+    }
+
+    @Override
+    public void validate() {
+        super.validate();
+        Validate.notNull(_baseColumnName, "Missing base column name");
+        Validate.notNull(_urlExpression, "Missing URL expression");
+        try {
+            MetaParser.parse(_urlExpression);
+        } catch (ParsingException e) {
+            throw new IllegalArgumentException(e);
+        }
+        Validate.notNull(_onError, "Missing 'on error' behaviour");
+        Validate.notNull(_newColumnName, "Missing new column name");
+        Validate.isTrue(_columnInsertIndex >= 0, "Invalid column insert index");
     }
 
     @JsonProperty("newColumnName")

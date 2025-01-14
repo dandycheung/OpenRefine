@@ -27,20 +27,29 @@
 
 package com.google.refine.browsing.facets;
 
+import static org.testng.Assert.assertEquals;
+
 import java.io.IOException;
+import java.io.Serializable;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 
 import com.fasterxml.jackson.core.JsonParseException;
 import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.testng.annotations.AfterMethod;
+import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
 
 import com.google.refine.RefineTest;
 import com.google.refine.browsing.Engine;
 import com.google.refine.browsing.facets.ListFacet.ListFacetConfig;
+import com.google.refine.expr.MetaParser;
+import com.google.refine.grel.Parser;
 import com.google.refine.model.Project;
 import com.google.refine.util.ParsingUtilities;
 import com.google.refine.util.TestUtils;
@@ -52,6 +61,19 @@ public class ListFacetTests extends RefineTest {
             + "\"name\":\"facet A\","
             + "\"columnName\":\"Column A\","
             + "\"expression\":\"value+\\\"bar\\\"\","
+            + "\"omitBlank\":false,"
+            + "\"omitError\":false,"
+            + "\"selection\":[{\"v\":{\"v\":\"foobar\",\"l\":\"true\"}}],"
+            + "\"selectBlank\":false,"
+            + "\"selectError\":false,"
+            + "\"invert\":false"
+            + "}";
+
+    private static String jsonConfigParseError = "{"
+            + "\"type\":\"list\","
+            + "\"name\":\"facet A\","
+            + "\"columnName\":\"Column A\","
+            + "\"expression\":\"foo(\","
             + "\"omitBlank\":false,"
             + "\"omitError\":false,"
             + "\"selection\":[{\"v\":{\"v\":\"foobar\",\"l\":\"true\"}}],"
@@ -90,6 +112,16 @@ public class ListFacetTests extends RefineTest {
             + "    {\"v\":{\"v\":\"foobar\",\"l\":\"true\"},\"c\":0,\"s\":true}"
             + "]}";
 
+    @BeforeMethod
+    public void registerGRELParser() {
+        MetaParser.registerLanguageParser("grel", "GREL", Parser.grelParser, "value");
+    }
+
+    @AfterMethod
+    public void unregisterGRELParser() {
+        MetaParser.unregisterLanguageParser("grel");
+    }
+
     @Test
     public void serializeListFacetConfig() throws JsonParseException, JsonMappingException, IOException {
         ListFacetConfig facetConfig = ParsingUtilities.mapper.readValue(jsonConfig, ListFacetConfig.class);
@@ -97,10 +129,25 @@ public class ListFacetTests extends RefineTest {
     }
 
     @Test
+    public void testColumnDependencies() throws Exception {
+        ListFacetConfig facetConfig = ParsingUtilities.mapper.readValue(jsonConfig, ListFacetConfig.class);
+        assertEquals(facetConfig.getColumnDependencies(), Optional.of(Collections.singleton("Column A")));
+    }
+
+    @Test
+    public void testColumnDependenciesWithError() throws Exception {
+        ListFacetConfig facetConfig = ParsingUtilities.mapper.readValue(jsonConfigParseError, ListFacetConfig.class);
+        assertEquals(facetConfig.getColumnDependencies(), Optional.of(Collections.emptySet()));
+    }
+
+    @Test
     public void serializeListFacet() throws JsonParseException, JsonMappingException, IOException {
-        Project project = createCSVProject("Column A\n" +
-                "foo\n" +
-                "bar\n");
+        Project project = createProject(
+                new String[] { "Column A" },
+                new Serializable[][] {
+                        { "foo" },
+                        { "bar" }
+                });
         Engine engine = new Engine(project);
 
         ListFacetConfig facetConfig = ParsingUtilities.mapper.readValue(jsonConfig, ListFacetConfig.class);
@@ -120,9 +167,12 @@ public class ListFacetTests extends RefineTest {
 
     @Test
     public void serializeListFacetWithError() throws JsonParseException, JsonMappingException, IOException {
-        Project project = createCSVProject("other column\n" +
-                "foo\n" +
-                "bar\n");
+        Project project = createProject(
+                new String[] { "other column" },
+                new Serializable[][] {
+                        { "foo" },
+                        { "bar" }
+                });
 
         ListFacetConfig facetConfig = ParsingUtilities.mapper.readValue(jsonConfig, ListFacetConfig.class);
         Facet facet = facetConfig.apply(project);
@@ -131,10 +181,13 @@ public class ListFacetTests extends RefineTest {
 
     @Test
     public void testSelectedEmptyChoice() throws IOException {
-        Project project = createCSVProject("Column A\n" +
-                "a\n" +
-                "c\n" +
-                "e");
+        Project project = createProject(
+                new String[] { "Column A" },
+                new Serializable[][] {
+                        { "a" },
+                        { "c" },
+                        { "e" },
+                });
         Engine engine = new Engine(project);
 
         ListFacetConfig facetConfig = ParsingUtilities.mapper.readValue(jsonConfig, ListFacetConfig.class);
