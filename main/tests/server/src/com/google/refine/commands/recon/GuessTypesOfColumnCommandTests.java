@@ -6,6 +6,7 @@ import static org.mockito.Mockito.when;
 
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.io.Serializable;
 import java.io.StringWriter;
 import java.util.concurrent.TimeUnit;
 
@@ -34,22 +35,20 @@ public class GuessTypesOfColumnCommandTests extends RefineTest {
     Project project = null;
 
     @BeforeMethod
-    public void setUpCommand() {
+    public void setUpCommand() throws IOException {
         command = new GuessTypesOfColumnCommand();
         command.setSampleSize(2);
         request = mock(HttpServletRequest.class);
         response = mock(HttpServletResponse.class);
         writer = new StringWriter();
-        try {
-            when(response.getWriter()).thenReturn(new PrintWriter(writer));
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-        project = createCSVProject(
-                "foo,bar\n"
-                        + "France,b\n"
-                        + "Japan,d\n"
-                        + "Paraguay,x");
+        when(response.getWriter()).thenReturn(new PrintWriter(writer));
+        project = createProject(
+                new String[] { "foo", "bar" },
+                new Serializable[][] {
+                        { "France", "b" },
+                        { "Japan", "d" },
+                        { "Paraguay", "x" }
+                });
 
     }
 
